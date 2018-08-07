@@ -100,7 +100,7 @@ class MyNode extends MoSocket {
               const result = await $proto$.onMakeSandwichData(msg, data)
               return {
                 success: true,
-                data: msgpack.encode(data)
+                data: msgpack.encode(result)
               }
             } catch (e) {
               return {
@@ -111,7 +111,8 @@ class MyNode extends MoSocket {
           },
           onResponse: async (msg) => {
             msg = msgpack.decode(msg.data)
-            onMakeSandwichResult(msg.cheese, msg.filler)
+            console.log('rsp', msg)
+            $proto$.onMakeSandwichResult(msg.cheese, msg.filler)
           }
         }
       }
@@ -140,7 +141,8 @@ async function _main () {
   console.log('connected:', remote.toString(), node2.getAddr(remote))
 
   await node2.myproto.paperAirplane([remote], 'slim', 'yellow')
-  await node2.myproto.makeSandwich([remote], false, 'avacado')
+  const sandwich = await node2.myproto.makeSandwich([remote], false, 'avacado')
+  console.log('test got makeSandwich result:', sandwich)
 
   setTimeout(() => {
     node1.close()
@@ -173,6 +175,6 @@ async function _main () {
 }
 
 _main().then(() => {}, (err) => {
-  console.error(err)
+  console.error(err.stack || err.toString())
   process.exit(1)
 })
