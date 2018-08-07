@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 'use strict'
 
+const msgpack = require('msgpack-lite')
+
 /*
 const mosocket = require('../lib/index')
 
@@ -15,8 +17,45 @@ const { MoSocket } = require('../lib/mosocket')
 const config = require('../lib/config')()
 // const tcp = require('../lib/tcp')
 
+class MyProto {
+  onPaperAirplane (style, color) {
+    console.log('got paper airplane, style: ' + style + ', color: ' + color)
+  }
+}
+
+class MyNode extends MoSocket {
+  constructor (...args) {
+    super(...args)
+    this.on('bind', (addr) => {
+      console.log('node listening at', addr)
+    })
+
+    const $proto$ = new MyProto()
+
+    this.myproto = this.installProtocol({
+      name: 'MyProto',
+      version: '0.0.1',
+      hooks: {
+        paperAirplane: {
+          pattern: MoSocket.PATTERN_NOTIFY_RELIABLE,
+          inputTransform: (style, color) => {
+            return msgpack.encode({
+              style,
+              color
+            })
+          },
+          onNotifyReliable: (msg, con) => {
+            msg = msgpack.decode(msg)
+            $proto$.onPaperAirplane(msg.style, msg.color)
+          }
+        }
+      }
+    })
+  }
+}
+
 async function _main () {
-  const node1 = new MoSocket(config)
+  const node1 = new MyNode(config)
   node1.on('bind', (addr) => {
     console.log('node listening at', addr)
   })
@@ -26,9 +65,11 @@ async function _main () {
   const addr = node1.getListeningAddrs()[0]
   console.log('attempting to connect to', addr)
 
-  const node2 = new MoSocket(config)
+  const node2 = new MyNode(config)
 
   await node2.connect(addr)
+
+  await node2.myproto.paperAirplane('slim', 'yellow')
 
   setTimeout(() => {
     node1.close()
