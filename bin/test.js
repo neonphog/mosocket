@@ -21,6 +21,27 @@ class MyProto {
   onPaperAirplane (style, color) {
     console.log('got paper airplane, style: ' + style + ', color: ' + color)
   }
+
+  async onMakeSandwichPreauth (cheese) {
+    console.log('makeSandwichPreauth', 'cheese:', cheese)
+    if (cheese) {
+      throw new Error('we have no cheese')
+    }
+  }
+
+  async onMakeSandwichData (cheese, filler) {
+    if (cheese) {
+      throw new Error('how did we request cheese? should have been rejected in preauth')
+    }
+    if (filler === 'salami') {
+      throw new Error('we have no salami')
+    }
+    return { cheese, filler }
+  }
+
+  onMakeSandwichResult (cheese, filler) {
+    console.log('got makeSandwich result, cheese: ' + cheese + ', filler: ' + filler)
+  }
 }
 
 class MyNode extends MoSocket {
@@ -44,9 +65,53 @@ class MyNode extends MoSocket {
               color
             })
           },
-          onNotifyReliable: (msg, con) => {
-            msg = msgpack.decode(msg)
+          onNotifyReliable: (msg) => {
+            msg = msgpack.decode(msg.data)
             $proto$.onPaperAirplane(msg.style, msg.color)
+          }
+        },
+        makeSandwich: {
+          pattern: MoSocket.PATTERN_FIRST,
+          inputTransform: (cheese, filler) => {
+            return {
+              preauthData: msgpack.encode(cheese),
+              data: msgpack.encode(filler)
+            }
+          },
+          onPreauthReq: async (msg) => {
+            msg = msgpack.decode(msg.data)
+            try {
+              await $proto$.onMakeSandwichPreauth(msg)
+              return {
+                preauth: true,
+                data: null
+              }
+            } catch (e) {
+              return {
+                preauth: false,
+                data: msgpack.encode(e.stack)
+              }
+            }
+          },
+          onRequest: async (msg, data) => {
+            msg = msgpack.decode(msg.data)
+            data = msgpack.decode(data)
+            try {
+              const result = await $proto$.onMakeSandwichData(msg, data)
+              return {
+                success: true,
+                data: msgpack.encode(data)
+              }
+            } catch (e) {
+              return {
+                success: false,
+                data: msgpack.encode(e.stack)
+              }
+            }
+          },
+          onResponse: async (msg) => {
+            msg = msgpack.decode(msg.data)
+            onMakeSandwichResult(msg.cheese, msg.filler)
           }
         }
       }
@@ -59,6 +124,10 @@ async function _main () {
   node1.on('bind', (addr) => {
     console.log('node listening at', addr)
   })
+  node1.on('connection', (proxy) => {
+    console.log('got connection:', proxy.toString(), node1.getAddr(proxy))
+    node1.myproto.paperAirplane([proxy], 'wide', 'green')
+  })
 
   await node1.bind()
 
@@ -67,14 +136,16 @@ async function _main () {
 
   const node2 = new MyNode(config)
 
-  await node2.connect(addr)
+  const remote = await node2.connect(addr)
+  console.log('connected:', remote.toString(), node2.getAddr(remote))
 
-  await node2.myproto.paperAirplane('slim', 'yellow')
+  await node2.myproto.paperAirplane([remote], 'slim', 'yellow')
+  await node2.myproto.makeSandwich([remote], false, 'avacado')
 
   setTimeout(() => {
     node1.close()
     node2.close()
-  }, 1000)
+  }, 3000)
 
   /*
   const ma = new MultiAddr('/ip4/127.0.0.1/tcp/11011/udp/11012')
