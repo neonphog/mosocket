@@ -3,8 +3,7 @@
 
 const msgpack = require('msgpack-lite')
 
-const { MoSocket } = require('../lib/mosocket')
-const config = require('../lib/config')()
+const { MoSocket, config } = require('../lib/index')
 
 class MyProto {
   onPaperAirplane (style, color) {
@@ -102,7 +101,7 @@ class MyNode extends MoSocket {
 }
 
 async function _main () {
-  const node1 = new MyNode(config)
+  const node1 = new MyNode(config())
   node1.on('bind', (addr) => {
     console.log('node listening at', addr)
   })
@@ -116,7 +115,7 @@ async function _main () {
   const addr = node1.getListeningAddrs()[0]
   console.log('attempting to connect to', addr)
 
-  const node2 = new MyNode(config)
+  const node2 = new MyNode(config())
 
   const remote = await node2.connect(addr)
   console.log('connected:', remote.toString(), node2.getAddr(remote))
