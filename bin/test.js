@@ -5,38 +5,9 @@ const msgpack = require('msgpack-lite')
 
 const { MoSocket, config } = require('../lib/index')
 
-class MyProto {
-  onPaperAirplane (style, color) {
-    return JSON.stringify({ style, color })
-  }
-
-  async onMakeSandwichPreauth (cheese) {
-    if (cheese) {
-      throw new Error('we have no cheese')
-    }
-    return { cheese: false }
-  }
-
-  async onMakeSandwichData (cheese, filler) {
-    if (cheese) {
-      throw new Error('how did we request cheese? should have been rejected in preauth')
-    }
-    if (filler === 'salami') {
-      throw new Error('we have no salami')
-    }
-    return { cheese, filler }
-  }
-
-  onMakeSandwichResult (cheese, filler) {
-    return { cheese, filler }
-  }
-}
-
 class MyNode extends MoSocket {
   constructor (config) {
     super(config)
-
-    const $proto$ = new MyProto()
 
     this.on('bind', (addr) => {
       console.log('node listening at', addr)
@@ -48,51 +19,57 @@ class MyNode extends MoSocket {
       hooks: {
         paperAirplane: {
           pattern: MoSocket.PATTERN_NOTIFY_RELIABLE,
-          inputTransform: (style, color) => {
-            return msgpack.encode({
-              style,
-              color
-            })
+          initiator: {
+            onNotifyReliable: (style, color) => {
+              return msgpack.encode({
+                style,
+                color
+              })
+            }
           },
-          onNotifyReliable: (msg) => {
-            msg = msgpack.decode(msg.data)
-            console.log('## paperAirplane')
-            console.log('<- ' +
-              $proto$.onPaperAirplane(msg.style, msg.color))
+          responder: {
+            onNotifyReliable: (msg) => {
+              msg = msgpack.decode(msg.data)
+              console.log('[paperAirplane] ' + JSON.stringify(msg))
+            }
           }
         },
         makeSandwich: {
           pattern: MoSocket.PATTERN_FIRST,
-          inputTransform: (cheese, filler) => {
-            return {
-              preauthData: msgpack.encode(cheese),
-              data: msgpack.encode(filler)
+          initiator: {
+            onPreauthReq: (ctx, cheese, filler) => {
+              ctx._cheese = cheese
+              ctx._filler = filler
+              return msgpack.encode(!!cheese)
+            },
+            onRequest: (ctx) => {
+              return msgpack.encode(ctx._filler.toString())
+            },
+            onResponse: (ctx, msg) => {
+              msg = msgpack.decode(msg.data)
+              return {
+                cheese: ctx._cheese,
+                filler: ctx._filler,
+                result: msg
+              }
             }
           },
-          onPreauthReq: async (msg) => {
-            console.log('## makeSandwich onPreauthReq')
-            msg = msgpack.decode(msg.data)
-            console.log('<- ' + JSON.stringify(msg))
-            const result = await $proto$.onMakeSandwichPreauth(msg)
-            console.log('-> ' + JSON.stringify(result))
-            return result
-          },
-          onRequest: async (preData, data) => {
-            console.log('## makeSandwich onRequest')
-            data = msgpack.decode(data)
-            console.log('<- ' + JSON.stringify(data))
-            const result = await $proto$.onMakeSandwichData(
-              preData.cheese, data)
-            console.log('-> ' + JSON.stringify(result))
-            return msgpack.encode(result)
-          },
-          onResponse: async (msg) => {
-            console.log('## makeSandwich onResponse')
-            msg = msgpack.decode(msg.data)
-            console.log('<- ' + JSON.stringify(msg))
-            const result = $proto$.onMakeSandwichResult(msg.cheese, msg.filler)
-            console.log('-> ' + JSON.stringify(result))
-            return result
+          responder: {
+            onPreauthReq: (ctx, msg) => {
+              const cheese = msgpack.decode(msg.data)
+              ctx._cheese = cheese
+              if (cheese) {
+                throw new Error('we have no cheese')
+              }
+            },
+            onRequest: (ctx, msg) => {
+              const filler = msgpack.decode(msg.data)
+              if (filler === 'salami') {
+                throw new Error('we have no salami')
+              }
+              return msgpack.encode(
+                'sandwich(cheese:' + ctx._cheese + ',filler:' + filler + ')')
+            }
           }
         }
       }
@@ -122,13 +99,13 @@ async function _main () {
 
   await node2.myproto.paperAirplane([remote], 'slim', 'yellow')
   let sandwich = await node2.myproto.makeSandwich([remote], false, 'avacado')
-  console.log('test got makeSandwich result1:', sandwich)
+  console.log('makeSandwich:result1:', sandwich)
 
   let success = false
   try {
     sandwich = await node2.myproto.makeSandwich([remote], true, 'avacado')
   } catch (e) {
-    console.log('result2 success - server has no cheese')
+    console.log('makeSandwich:result2 success - server has no cheese')
     success = true
   }
   if (!success) {
@@ -139,7 +116,7 @@ async function _main () {
   try {
     sandwich = await node2.myproto.makeSandwich([remote], false, 'salami')
   } catch (e) {
-    console.log('result3 success - server has no salami')
+    console.log('makeSandwich:result3 success - server has no salami')
     success = true
   }
   if (!success) {
