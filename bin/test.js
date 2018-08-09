@@ -3,30 +3,19 @@
 
 const msgpack = require('msgpack-lite')
 
-/*
-const mosocket = require('../lib/index')
-
-mosocket.test().then(() => {}, (err) => {
-  console.error(err)
-  process.exit(1)
-})
-*/
-
 const { MoSocket } = require('../lib/mosocket')
-// const { MultiAddr } = require('../lib/multiaddr')
 const config = require('../lib/config')()
-// const tcp = require('../lib/tcp')
 
 class MyProto {
   onPaperAirplane (style, color) {
-    console.log('got paper airplane, style: ' + style + ', color: ' + color)
+    return JSON.stringify({ style, color })
   }
 
   async onMakeSandwichPreauth (cheese) {
-    console.log('makeSandwichPreauth', 'cheese:', cheese)
     if (cheese) {
       throw new Error('we have no cheese')
     }
+    return { cheese: false }
   }
 
   async onMakeSandwichData (cheese, filler) {
@@ -40,18 +29,19 @@ class MyProto {
   }
 
   onMakeSandwichResult (cheese, filler) {
-    console.log('got makeSandwich result, cheese: ' + cheese + ', filler: ' + filler)
+    return { cheese, filler }
   }
 }
 
 class MyNode extends MoSocket {
-  constructor (...args) {
-    super(...args)
+  constructor (config) {
+    super(config)
+
+    const $proto$ = new MyProto()
+
     this.on('bind', (addr) => {
       console.log('node listening at', addr)
     })
-
-    const $proto$ = new MyProto()
 
     this.myproto = this.installProtocol({
       name: 'MyProto',
@@ -67,7 +57,9 @@ class MyNode extends MoSocket {
           },
           onNotifyReliable: (msg) => {
             msg = msgpack.decode(msg.data)
-            $proto$.onPaperAirplane(msg.style, msg.color)
+            console.log('## paperAirplane')
+            console.log('<- ' +
+              $proto$.onPaperAirplane(msg.style, msg.color))
           }
         },
         makeSandwich: {
@@ -79,40 +71,29 @@ class MyNode extends MoSocket {
             }
           },
           onPreauthReq: async (msg) => {
+            console.log('## makeSandwich onPreauthReq')
             msg = msgpack.decode(msg.data)
-            try {
-              await $proto$.onMakeSandwichPreauth(msg)
-              return {
-                preauth: true,
-                data: null
-              }
-            } catch (e) {
-              return {
-                preauth: false,
-                data: msgpack.encode(e.stack)
-              }
-            }
+            console.log('<- ' + JSON.stringify(msg))
+            const result = await $proto$.onMakeSandwichPreauth(msg)
+            console.log('-> ' + JSON.stringify(result))
+            return result
           },
-          onRequest: async (msg, data) => {
-            msg = msgpack.decode(msg.data)
+          onRequest: async (preData, data) => {
+            console.log('## makeSandwich onRequest')
             data = msgpack.decode(data)
-            try {
-              const result = await $proto$.onMakeSandwichData(msg, data)
-              return {
-                success: true,
-                data: msgpack.encode(result)
-              }
-            } catch (e) {
-              return {
-                success: false,
-                data: msgpack.encode(e.stack)
-              }
-            }
+            console.log('<- ' + JSON.stringify(data))
+            const result = await $proto$.onMakeSandwichData(
+              preData.cheese, data)
+            console.log('-> ' + JSON.stringify(result))
+            return msgpack.encode(result)
           },
           onResponse: async (msg) => {
+            console.log('## makeSandwich onResponse')
             msg = msgpack.decode(msg.data)
-            console.log('rsp', msg)
-            $proto$.onMakeSandwichResult(msg.cheese, msg.filler)
+            console.log('<- ' + JSON.stringify(msg))
+            const result = $proto$.onMakeSandwichResult(msg.cheese, msg.filler)
+            console.log('-> ' + JSON.stringify(result))
+            return result
           }
         }
       }
@@ -141,37 +122,33 @@ async function _main () {
   console.log('connected:', remote.toString(), node2.getAddr(remote))
 
   await node2.myproto.paperAirplane([remote], 'slim', 'yellow')
-  const sandwich = await node2.myproto.makeSandwich([remote], false, 'avacado')
-  console.log('test got makeSandwich result:', sandwich)
+  let sandwich = await node2.myproto.makeSandwich([remote], false, 'avacado')
+  console.log('test got makeSandwich result1:', sandwich)
 
-  setTimeout(() => {
-    node1.close()
-    node2.close()
-  }, 3000)
+  let success = false
+  try {
+    sandwich = await node2.myproto.makeSandwich([remote], true, 'avacado')
+  } catch (e) {
+    console.log('result2 success - server has no cheese')
+    success = true
+  }
+  if (!success) {
+    throw new Error('expected the server to have no cheese')
+  }
 
-  /*
-  const ma = new MultiAddr('/ip4/127.0.0.1/tcp/11011/udp/11012')
+  success = false
+  try {
+    sandwich = await node2.myproto.makeSandwich([remote], false, 'salami')
+  } catch (e) {
+    console.log('result3 success - server has no salami')
+    success = true
+  }
+  if (!success) {
+    throw new Error('expected the server to have no salami')
+  }
 
-  const srv = await tcp.Listener.create(config, ma)
-  srv.on('connection', (con) => {
-    con.on('message', (msg) => {
-      console.log('msg:', msg.toString())
-    })
-    con.send(Buffer.from('test back'))
-  })
-
-  const cli = await tcp.Connection.create(config, ma)
-  cli.on('message', (msg) => {
-    console.log('msg back:', msg.toString())
-  })
-
-  cli.send(Buffer.from('hello'))
-
-  setTimeout(() => {
-    cli.close()
-    srv.close()
-  }, 1000)
-  */
+  node1.close()
+  node2.close()
 }
 
 _main().then(() => {}, (err) => {
