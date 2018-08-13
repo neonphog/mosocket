@@ -20,7 +20,7 @@
   },
   "dependencies": {
     "msgpack-lite": "^0.1.26",
-    "mosodium": "github:neonphog/mosodium#98310d2ebcdd4363c372cec0e9d52c478861961a"
+    "mosodium": "github:neonphog/mosodium#85fdb1d426e7df446d9c591bbbe35d5b2d7c41b8"
   },
   "standard": {
     "env": {
